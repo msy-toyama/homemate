@@ -6,52 +6,100 @@
 //
 
 import CoreData
+import os
+
+private let persistenceLogger = Logger(subsystem: "com.yostfandy.HomeMate", category: "persistence")
 
 struct PersistenceController {
-    static let shared = PersistenceController()
+    nonisolated static let shared = PersistenceController()
 
+    /// SwiftUI プレビュー用のインメモリストア。サンプルデータを投入する。
     @MainActor
     static let preview: PersistenceController = {
         let result = PersistenceController(inMemory: true)
         let viewContext = result.container.viewContext
-        for _ in 0..<10 {
-            let newItem = Item(context: viewContext)
-            newItem.timestamp = Date()
-        }
+        SampleData.seed(into: viewContext)
         do {
             try viewContext.save()
         } catch {
-            // Replace this implementation with code to handle the error appropriately.
-            // fatalError() causes the application to generate a crash log and terminate. You should not use this function in a shipping application, although it may be useful during development.
             let nsError = error as NSError
-            fatalError("Unresolved error \(nsError), \(nsError.userInfo)")
+            assertionFailure("Preview seed failed: \(nsError), \(nsError.userInfo)")
         }
         return result
     }()
 
     let container: NSPersistentCloudKitContainer
 
-    init(inMemory: Bool = false) {
-        container = NSPersistentCloudKitContainer(name: "HomeMate")
-        if inMemory {
-            container.persistentStoreDescriptions.first!.url = URL(fileURLWithPath: "/dev/null")
-        }
-        container.loadPersistentStores(completionHandler: { (storeDescription, error) in
-            if let error = error as NSError? {
-                // Replace this implementation with code to handle the error appropriately.
-                // fatalError() causes the application to generate a crash log and terminate. You should not use this function in a shipping application, although it may be useful during development.
+    /// 永続ストアの読み込みに失敗した場合のエラー。成功時は nil。
+    /// UI 側でフォールバック画面を表示するために参照する。
+    let loadError: Error?
 
-                /*
-                 Typical reasons for an error here include:
-                 * The parent directory does not exist, cannot be created, or disallows writing.
-                 * The persistent store is not accessible, due to permissions or data protection when the device is locked.
-                 * The device is out of space.
-                 * The store could not be migrated to the current model version.
-                 Check the error message to determine what the actual problem was.
-                 */
-                fatalError("Unresolved error \(error), \(error.userInfo)")
+    init(inMemory: Bool = false) {
+        container = NSPersistentCloudKitContainer(name: AppConfig.coreDataModelName)
+
+        var capturedError: Error?
+
+        // ユニットテスト実行時はホストアプリが未署名で CloudKit エンタイトルメントを
+        // 持たないため、CloudKit を無効化してローカルのみで動かす。
+        let isTesting = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+
+        if let description = container.persistentStoreDescriptions.first {
+            // 将来のアップデートでモデルを追加的に変更しても、既存データを損なわずに
+            // 自動で軽量マイグレーションする（CloudKit 同期は追加変更のみ許容するため、
+            // 推論マッピングで安全に移行できる）。既定でも true だが意図を明示する。
+            description.shouldMigrateStoreAutomatically = true
+            description.shouldInferMappingModelAutomatically = true
+
+            if inMemory || isTesting {
+                description.url = URL(fileURLWithPath: "/dev/null")
+                description.cloudKitContainerOptions = nil
+            } else {
+                // App Group 上にストアを置き、Widget からも参照できるようにする。
+                if let groupURL = FileManager.default
+                    .containerURL(forSecurityApplicationGroupIdentifier: AppConfig.appGroupIdentifier) {
+                    description.url = groupURL.appendingPathComponent("HomeMate.sqlite")
+                }
+
+                // 履歴トラッキングとリモート変更通知（CloudKit 同期に必要）。
+                description.setOption(true as NSNumber, forKey: NSPersistentHistoryTrackingKey)
+                description.setOption(true as NSNumber,
+                                      forKey: NSPersistentStoreRemoteChangeNotificationPostOptionKey)
+
+                // CloudKit コンテナを明示的に設定する。
+                description.cloudKitContainerOptions = NSPersistentCloudKitContainerOptions(
+                    containerIdentifier: AppConfig.cloudKitContainerIdentifier
+                )
             }
-        })
+
+            // loadPersistentStores はローカル SQLite ストアでは同期的にコールバックを呼ぶため、
+            // ローカル変数で受けてから loadError に確定できる。
+            container.loadPersistentStores { _, error in
+                if let error = error as NSError? {
+                    // 致命的に落とさず、UI 側でフォールバックを出せるようエラーを保持する。
+                    capturedError = error
+                    persistenceLogger.error("Core Data ストアの読み込みに失敗: \(error, privacy: .private)")
+                }
+            }
+        } else {
+            // ストア記述が見つからない異常系。クラッシュさせず UI でフォールバックする。
+            capturedError = PersistenceError.missingStoreDescription
+            persistenceLogger.error("永続ストア記述が見つかりません")
+        }
+        loadError = capturedError
+
         container.viewContext.automaticallyMergesChangesFromParent = true
+        container.viewContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+        container.viewContext.name = "viewContext"
     }
+
+    /// バックグラウンド書き込み用のコンテキストを生成する。
+    func newBackgroundContext() -> NSManagedObjectContext {
+        let context = container.newBackgroundContext()
+        context.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+        return context
+    }
+}
+
+enum PersistenceError: Error {
+    case missingStoreDescription
 }

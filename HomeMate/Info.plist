@@ -2,9 +2,29 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>ja</string>
+	</array>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>
+	</array>
+	<key>CKSharingSupported</key>
+	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>招待QRコードを読み取って共有スペースに参加するためにカメラを使用します。</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.yostfandy.HomeMate.deeplink</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>homemate</string>
+			</array>
+		</dict>
 	</array>
 </dict>
 </plist>
