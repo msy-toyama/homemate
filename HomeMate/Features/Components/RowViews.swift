@@ -9,7 +9,8 @@ import SwiftUI
 
 /// タスク（家事・お願い）1件の行。
 struct TaskRow: View {
-    let task: Task
+    /// 管理オブジェクトの属性変更（完了など）を確実に再描画へ反映するため ObservedObject で保持する。
+    @ObservedObject var task: Task
     let home: Home
     var onComplete: () -> Void
     /// 行（チェックボックス以外）をタップしたときに詳細を開くためのハンドラ。
@@ -139,7 +140,8 @@ struct TaskRow: View {
 
 /// 買い物1件の行。
 struct GroceryRow: View {
-    let item: GroceryItem
+    /// 管理オブジェクトの属性変更（完了など）を確実に再描画へ反映するため ObservedObject で保持する。
+    @ObservedObject var item: GroceryItem
     var onToggle: () -> Void
     var onOpen: (() -> Void)?
 

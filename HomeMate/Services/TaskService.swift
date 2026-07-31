@@ -133,9 +133,9 @@ struct TaskService {
 
     @discardableResult
     func complete(_ task: Task, by member: Member?, now: Date = Date()) throws -> CompletionResult {
-        guard let home = task.home else {
-            throw NSError(domain: "TaskService", code: 1)
-        }
+        // home が一時的に nil（CloudKit 同期中など）でも、タスク自体の完了は必ず反映する。
+        // home 依存の副作用（メンタルロード記録・繰り返し生成・Widget 更新）は home がある場合のみ行う。
+        let home = task.home
 
         // 1〜3. 完了状態・完了者・完了日時。
         if task.taskTypeValue == .request {
@@ -148,20 +148,24 @@ struct TaskService {
         task.updatedAt = now
 
         // 4. メンタルロード：実行（do）。
-        mentalLoad.record(in: home, actorMemberId: member?.id,
-                          targetType: task.taskTypeValue == .request ? .request : .task,
-                          targetId: task.id, eventType: .do)
+        if let home {
+            mentalLoad.record(in: home, actorMemberId: member?.id,
+                              targetType: task.taskTypeValue == .request ? .request : .task,
+                              targetId: task.id, eventType: .do)
+        }
 
         // 5・6. 繰り返しタスクの次回生成と交代制の担当切替。
         var generated: Task?
-        if task.taskTypeValue != .request, task.repeatFrequencyValue != .none {
+        if let home, task.taskTypeValue != .request, task.repeatFrequencyValue != .none {
             generated = makeNextOccurrence(of: task, in: home, now: now)
         }
 
         try context.save()
         // 7. Widget 更新。
-        widgetCache.refresh(for: home)
-        try context.save()
+        if let home {
+            widgetCache.refresh(for: home)
+            try context.save()
+        }
 
         // 完了したタスクの予約済みリマインダーを取り消す。
         if let id = task.id {

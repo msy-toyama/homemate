@@ -10,7 +10,8 @@ import SwiftUI
 
 /// タスク（家事・お願い）1件のタイル。
 struct TaskTile: View {
-    let task: Task
+    /// 管理オブジェクトの属性変更（完了など）を確実に再描画へ反映するため ObservedObject で保持する。
+    @ObservedObject var task: Task
     let home: Home
     var onComplete: () -> Void
     var onOpen: (() -> Void)?
